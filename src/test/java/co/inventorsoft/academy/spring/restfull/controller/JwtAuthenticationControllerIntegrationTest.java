@@ -5,6 +5,7 @@ import co.inventorsoft.academy.spring.restfull.model.User;
 import co.inventorsoft.academy.spring.restfull.model.jwt.JwtRequest;
 import co.inventorsoft.academy.spring.restfull.model.jwt.JwtResponse;
 import co.inventorsoft.academy.spring.restfull.service.UserService;
+import co.inventorsoft.academy.spring.restfull.util.JwtTokenUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockServletContext;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -47,13 +52,18 @@ class JwtAuthenticationControllerIntegrationTest {
     private MockMvc mockMvc;
     private ObjectMapper objectMapper;
     private UserService userService;
+    private AuthenticationManager authenticationManager;
+    private JwtTokenUtil jwtTokenUtil;
 
     @Autowired
-    public JwtAuthenticationControllerIntegrationTest(WebApplicationContext webApplicationContext, MockMvc mockMvc, ObjectMapper objectMapper, UserService userService) {
+    public JwtAuthenticationControllerIntegrationTest(WebApplicationContext webApplicationContext, MockMvc mockMvc,
+                                                      ObjectMapper objectMapper, UserService userService, AuthenticationManager authenticationManager, JwtTokenUtil jwtTokenUtil) {
         this.webApplicationContext = webApplicationContext;
         this.mockMvc = mockMvc;
         this.objectMapper = objectMapper;
         this.userService = userService;
+        this.authenticationManager = authenticationManager;
+        this.jwtTokenUtil = jwtTokenUtil;
     }
 
     private static String adminToken;
@@ -66,21 +76,10 @@ class JwtAuthenticationControllerIntegrationTest {
     }
 
     private String getUserToken(String username, String password) throws Exception {
-        JwtRequest userRequest = new JwtRequest();
-        userRequest.setUsername(username);
-        userRequest.setPassword(password);
+        Authentication authentication =  authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(username, password));;
+        final UserDetails userDetails = (UserDetails) authentication.getPrincipal();
 
-        MvcResult userResult = mockMvc.perform(post("/sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequest)))
-                .andDo(print())
-                .andExpect(status().isOk())
-                .andReturn();
-
-        String jwtUserResponse = userResult.getResponse().getContentAsString();
-        JwtResponse userJwtResponse = objectMapper.readValue(jwtUserResponse, JwtResponse.class);
-
-        return userJwtResponse.getJwtToken();
+        return jwtTokenUtil.generateToken(userDetails);
     }
 
     @Test
