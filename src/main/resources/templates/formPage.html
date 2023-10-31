@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>CSRF Form Page</title>
+</head>
+<body>
+
+    <form action="/csrf-check-endpoint" method="post">
+        <input type="hidden" name="_csrf" th:value="${_csrf.token}" />
+        <button type="submit">Submit</button>
+    </form>
+
+</body>
+</html>
