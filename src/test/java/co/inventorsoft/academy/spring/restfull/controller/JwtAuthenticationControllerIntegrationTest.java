@@ -5,26 +5,30 @@ import co.inventorsoft.academy.spring.restfull.model.User;
 import co.inventorsoft.academy.spring.restfull.model.jwt.JwtRequest;
 import co.inventorsoft.academy.spring.restfull.model.jwt.JwtResponse;
 import co.inventorsoft.academy.spring.restfull.service.UserService;
-import co.inventorsoft.academy.spring.restfull.util.JwtTokenUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockServletContext;
-import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.context.WebApplicationContext;
 
 import javax.servlet.ServletContext;
 
 import java.util.Optional;
 import java.util.Random;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,20 +44,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class JwtAuthenticationControllerIntegrationTest {
 
     private WebApplicationContext webApplicationContext;
-
-    private AuthenticationManager authenticationManager;
     private MockMvc mockMvc;
     private ObjectMapper objectMapper;
-    private JwtTokenUtil jwtTokenUtil;
     private UserService userService;
 
     @Autowired
-    public JwtAuthenticationControllerIntegrationTest(WebApplicationContext webApplicationContext, AuthenticationManager authenticationManager, MockMvc mockMvc, ObjectMapper objectMapper, JwtTokenUtil jwtTokenUtil, UserService userService) {
+    public JwtAuthenticationControllerIntegrationTest(WebApplicationContext webApplicationContext, MockMvc mockMvc, ObjectMapper objectMapper, UserService userService) {
         this.webApplicationContext = webApplicationContext;
-        this.authenticationManager = authenticationManager;
         this.mockMvc = mockMvc;
         this.objectMapper = objectMapper;
-        this.jwtTokenUtil = jwtTokenUtil;
         this.userService = userService;
     }
 
@@ -62,26 +61,14 @@ class JwtAuthenticationControllerIntegrationTest {
 
     @BeforeEach
     public void givenValidAdminAndUserCredentials_whenAuthenticateUsers_thenSetTokens() throws Exception {
-        //get token for admin
-        JwtRequest adminRequest = new JwtRequest();
-        adminRequest.setUsername("test_admin");
-        adminRequest.setPassword("Test");
+        adminToken = getUserToken("test_admin", "Test");
+        userToken = getUserToken("test_user", "Test");
+    }
 
-        MvcResult adminResult = mockMvc.perform(post("/sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(adminRequest)))
-                .andDo(print())
-                .andExpect(status().isOk())
-                .andReturn();
-
-        String jwtAdminResponse = adminResult.getResponse().getContentAsString();
-        JwtResponse adminJwtResponse = objectMapper.readValue(jwtAdminResponse, JwtResponse.class);
-        adminToken = adminJwtResponse.getJwtToken();
-
-        //get token for user
+    private String getUserToken(String username, String password) throws Exception {
         JwtRequest userRequest = new JwtRequest();
-        userRequest.setUsername("test_user");
-        userRequest.setPassword("Test");
+        userRequest.setUsername(username);
+        userRequest.setPassword(password);
 
         MvcResult userResult = mockMvc.perform(post("/sign-in")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -92,7 +79,8 @@ class JwtAuthenticationControllerIntegrationTest {
 
         String jwtUserResponse = userResult.getResponse().getContentAsString();
         JwtResponse userJwtResponse = objectMapper.readValue(jwtUserResponse, JwtResponse.class);
-        userToken = userJwtResponse.getJwtToken();
+
+        return userJwtResponse.getJwtToken();
     }
 
     @Test
@@ -102,126 +90,99 @@ class JwtAuthenticationControllerIntegrationTest {
         Assertions.assertNotNull(servletContext);
         Assertions.assertTrue(servletContext instanceof MockServletContext);
         Assertions.assertNotNull(webApplicationContext.getBean("jwtAuthenticationController"));
-
     }
 
-    @Test
-    void givenSignInURI_whenMockMVC_withValidAdminCredentials_thenVerifyResponse() throws Exception {
+    @ParameterizedTest
+    @MethodSource("signInData")
+    void givenSignInURI_whenMockMVC_thenVerifyResponse(String username, String password, HttpStatus expectedStatus,
+                                                       boolean isTokenExists, String expectedMessage) throws Exception {
         JwtRequest request = new JwtRequest();
-        request.setUsername("test_admin");
-        request.setPassword("Test");
+        request.setUsername(username);
+        request.setPassword(password);
 
-        MvcResult mvcResult = mockMvc.perform(post("/sign-in")
+        ResultActions resultActions = mockMvc.perform(post("/sign-in")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andDo(print())
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.jwtToken").exists())
-                .andExpect(jsonPath("$.message").value("You were authenticated successfully!"))
-                .andReturn();
+                .andExpect(status().is(expectedStatus.value()));
+
+        if (isTokenExists) {
+            resultActions.andExpect(jsonPath("$.jwtToken").exists());
+        } else {
+            resultActions.andExpect(jsonPath("$.jwtToken").doesNotExist());
+        }
+
+        resultActions.andExpect(jsonPath("$.message").value(expectedMessage));
+        MvcResult mvcResult = resultActions.andReturn();
 
         assertEquals("application/json;charset=UTF-8", mvcResult.getResponse().getContentType());
     }
 
-    @Test
-    void givenSignInURI_whenMockMVC_withInvalidAdminCredentials_thenVerifyResponse() throws Exception {
-        JwtRequest request = new JwtRequest();
-        request.setUsername("test_admin");
-        request.setPassword("BadPassword");
-
-        MvcResult mvcResult = mockMvc.perform(post("/sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andDo(print())
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.jwtToken").doesNotExist())
-                .andExpect(jsonPath("$.message").value("Invalid credentials"))
-                .andReturn();
-
-        assertEquals("application/json;charset=UTF-8", mvcResult.getResponse().getContentType());
+    static Stream<Arguments> signInData() {
+        return Stream.of(
+                Arguments.of("test_admin", "Test", HttpStatus.OK, true, "You were authenticated successfully!"),
+                Arguments.of("test_admin", "BadPassword", HttpStatus.UNAUTHORIZED, false, "Invalid credentials"),
+                Arguments.of("test_user", "Test", HttpStatus.OK, true, "You were authenticated successfully!"),
+                Arguments.of("test_user", "BadPassword", HttpStatus.UNAUTHORIZED, false, "Invalid credentials"),
+                Arguments.of(null, null, HttpStatus.UNAUTHORIZED, false, "Invalid credentials")
+        );
     }
 
-    @Test
-    void givenSignInURI_whenMockMVC_withValidUserCredentials_thenVerifyResponse() throws Exception {
-        JwtRequest request = new JwtRequest();
-        request.setUsername("test_user");
-        request.setPassword("Test");
-
-        MvcResult mvcResult = mockMvc.perform(post("/sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andDo(print())
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.jwtToken").exists())
-                .andExpect(jsonPath("$.message").value("You were authenticated successfully!"))
-                .andReturn();
-
-        assertEquals("application/json;charset=UTF-8", mvcResult.getResponse().getContentType());
-    }
-
-    @Test
-    void givenSignInURI_whenMockMVC_withInvalidUserCredentials_thenVerifyResponse() throws Exception {
-        JwtRequest request = new JwtRequest();
-        request.setUsername("test_user");
-        request.setPassword("BadPassword");
-
-        MvcResult mvcResult = mockMvc.perform(post("/sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andDo(print())
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.jwtToken").doesNotExist())
-                .andExpect(jsonPath("$.message").value("Invalid credentials"))
-                .andReturn();
-
-        assertEquals("application/json;charset=UTF-8", mvcResult.getResponse().getContentType());
-    }
-
-    @Test
-    void givenSignUpURI_whenMockMvc_thenVerifyResponse() throws Exception {
-        Random random = new Random();
-        int randomNumber = random.nextInt(1000);
-        String userName = "test_user" + randomNumber;
-
+    @ParameterizedTest
+    @MethodSource("randomUserDtoProvider")
+    void givenSignUpURI_withValidUserData_whenMockMvc_thenVerifyResponse(String userName, String firstName,
+                       String lastName, String email, String phone, String password, HttpStatus expectedStatus, String expectedMessage) throws Exception {
         UserDto userDto = new UserDto();
         userDto.setUsername(userName);
-        userDto.setFirstname("Test");
-        userDto.setLastname("Test");
-        userDto.setEmail("test@gmail.com");
-        userDto.setPhone("+0000000000");
-        userDto.setPassword("TestPassword");
+        userDto.setFirstname(firstName);
+        userDto.setLastname(lastName);
+        userDto.setEmail(email);
+        userDto.setPhone(phone);
+        userDto.setPassword(password);
 
-        MvcResult mvcResult = mockMvc.perform(post("/sign-up")
+        ResultActions resultActions = mockMvc.perform(post("/sign-up")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(userDto)))
                 .andDo(print())
-                .andExpect(status().isOk())
-                .andExpect(content().string("User " + userName + " was registered successfully!"))
-                .andReturn();
+                .andExpect(status().is(expectedStatus.value()));
 
+        resultActions.andExpect(content().string(expectedMessage));
+        MvcResult mvcResult = resultActions.andReturn();
         assertEquals("application/json;charset=UTF-8", mvcResult.getResponse().getContentType());
 
         //clean-up DB
         Optional<User> user = userService.findByUsername(userName);
-        userService.delete(user.get());
+        user.ifPresent(value -> userService.delete(value));
     }
 
-    @Test
-    void givenGetAllUsersURI_whenMockMVC_withValidAdminToken_thenVerifyResponse() throws Exception {
+    static Stream<Arguments> randomUserDtoProvider() {
+        Random random = new Random();
+        int randomNumber = random.nextInt(1000);
+
+        return Stream.of(
+                Arguments.of("test_user" + randomNumber, "Test", "Test", "test@gmail.com",
+                        "+0000000000", "TestPassword", HttpStatus.OK, "User " + "test_user" + randomNumber + " was registered successfully!"),
+                Arguments.of("", "", "", "", "", "", HttpStatus.BAD_REQUEST, ""),
+                Arguments.of(null, null, null, null, null, null, HttpStatus.BAD_REQUEST, "")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("tokenProvider")
+    void givenGetAllUsersURI_whenMockMVC_thenVerifyResponse(String username, String password, HttpStatus expectedStatus) throws Exception {
+        String token = (username != null && password != null) ? getUserToken(username, password) : null;
 
         mockMvc.perform(get("/all-users")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
-                .andExpect(status().isOk());
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().is(expectedStatus.value()));
     }
 
-    @Test
-    void givenGetAllUsersURI_whenMockMVC_withValidUserToken_thenVerifyResponse() throws Exception {
-
-        mockMvc.perform(get("/all-users")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + userToken))
-                .andExpect(status().isForbidden());
+    static Stream<Arguments> tokenProvider() {
+        return Stream.of(
+                Arguments.of("test_admin", "Test", HttpStatus.OK),
+                Arguments.of("test_user", "Test", HttpStatus.FORBIDDEN),
+                Arguments.of(null, null, HttpStatus.UNAUTHORIZED)
+        );
     }
-
-
 
 }
