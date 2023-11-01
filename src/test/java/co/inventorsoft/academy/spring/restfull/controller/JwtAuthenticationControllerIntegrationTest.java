@@ -3,7 +3,6 @@ package co.inventorsoft.academy.spring.restfull.controller;
 import co.inventorsoft.academy.spring.restfull.dto.UserDto;
 import co.inventorsoft.academy.spring.restfull.model.User;
 import co.inventorsoft.academy.spring.restfull.model.jwt.JwtRequest;
-import co.inventorsoft.academy.spring.restfull.model.jwt.JwtResponse;
 import co.inventorsoft.academy.spring.restfull.service.UserService;
 import co.inventorsoft.academy.spring.restfull.util.JwtTokenUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
